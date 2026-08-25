@@ -477,6 +477,14 @@ def _gpu_environment() -> dict[str, Any]:
         return {"gpu": None, "driver": None}
 
 
+def _trt_environment() -> dict[str, Any]:
+    try:
+        import tensorrt
+    except Exception:
+        return {"trt_version": None}
+    return {"trt_version": getattr(tensorrt, "__version__", None)}
+
+
 def _initial_results(
     performance_suite: performance_catalog.PerformanceSuite,
     selected: Sequence[Mapping[str, Any]],
@@ -500,6 +508,7 @@ def _initial_results(
         "cuda_visible_devices": os.environ.get("CUDA_VISIBLE_DEVICES", ""),
         "nvidia_visible_devices": os.environ.get("NVIDIA_VISIBLE_DEVICES", ""),
         **_gpu_environment(),
+        **_trt_environment(),
     }
     return {
         "schema_version": RESULT_SCHEMA,
@@ -2549,6 +2558,7 @@ def _materialize_public_perf_report(
         "gpu": environment.get("gpu"),
         "gpu_uuid": environment.get("gpu_uuid"),
         "driver": environment.get("driver"),
+        "trt_version": environment.get("trt_version"),
         "platform": environment.get("platform"),
         "python": environment.get("python"),
         "python_executable": environment.get("python_executable"),
