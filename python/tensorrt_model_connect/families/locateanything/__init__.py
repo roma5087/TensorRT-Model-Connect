@@ -3,7 +3,6 @@
 
 """LocateAnything family plugin."""
 
-from .plugin import plugin
 from .task_contract import (
     Localization,
     detect_text_prompt,
@@ -17,6 +16,15 @@ from .task_contract import (
     parse_localizations,
     point_prompt,
 )
+
+
+def __getattr__(name):
+    if name == "plugin":
+        from .plugin import plugin as _plugin
+
+        return _plugin
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "Localization",
