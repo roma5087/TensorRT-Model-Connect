@@ -77,6 +77,13 @@ GPU_SPECS: dict[str, GpuSpec] = {
         fp16_tflops=4500,
         hbm_capacity_gb=192,
     ),
+    "B300": GpuSpec(
+        name="NVIDIA B300 Blackwell Ultra",
+        hbm_bandwidth_gb_s=8000,
+        fp32_tflops=80,
+        fp16_tflops=10000,
+        hbm_capacity_gb=288,
+    ),
     "H200": GpuSpec(
         name="NVIDIA H200",
         hbm_bandwidth_gb_s=4800,
@@ -97,6 +104,13 @@ GPU_SPECS: dict[str, GpuSpec] = {
         fp32_tflops=19.5,
         fp16_tflops=312,
         hbm_capacity_gb=80,
+    ),
+    "L4": GpuSpec(
+        name="NVIDIA L4",
+        hbm_bandwidth_gb_s=300,
+        fp32_tflops=30.3,
+        fp16_tflops=242,
+        hbm_capacity_gb=24,
     ),
     "L40S": GpuSpec(
         name="NVIDIA L40S",
