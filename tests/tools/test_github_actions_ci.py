@@ -15,10 +15,12 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
 import yaml
 
 from tools.ci.container import CiContainer
 from tools.ci.environment import OPTIONAL_TUNING_ENVIRONMENT
+from tools.ci.process import CiError
 from tools.ci.quality import UnitTestRunner
 from tools.ci.stage import ContainerStageRunner
 
@@ -230,6 +232,7 @@ def test_source_workflow_inventory_does_not_repeat_premerge_after_merge() -> Non
         "community-cpu.yml",
         "internal-ci-bridge.yml",
         "pages.yml",
+        "pr-metadata.yml",
     ]
 
     bridge = (workflows / "internal-ci-bridge.yml").read_text(encoding="utf-8")
@@ -264,6 +267,38 @@ def test_only_pages_workflow_creates_deployment_objects() -> None:
                 deployments.append((path.name, job_name, environment["name"]))
 
     assert deployments == [("pages.yml", "deploy", "github-pages")]
+
+
+def test_community_docs_gate_matches_pages_predeploy_contract() -> None:
+    workflows = REPO_ROOT / ".github" / "workflows"
+    pages = yaml.safe_load((workflows / "pages.yml").read_text(encoding="utf-8"))
+    community = yaml.safe_load(
+        (workflows / "community-cpu.yml").read_text(encoding="utf-8")
+    )
+
+    pages_build = pages["jobs"]["build"]
+    pages_steps = {step["name"]: step for step in pages_build["steps"]}
+    docs = community["jobs"]["docs"]
+    docs_steps = {step["name"]: step for step in docs["steps"]}
+
+    assert str(pages_steps["Set up Node"]["with"]["node-version"]) == "20"
+    assert docs_steps["Set up Node"] == {
+        "name": "Set up Node",
+        "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+        "with": {"node-version": "20"},
+    }
+    assert pages_build["defaults"]["run"]["working-directory"] == "website"
+    assert docs_steps["Test generated model support inventory"] == {
+        "name": "Test generated model support inventory",
+        "working-directory": "website",
+        "run": pages_steps["Test generated model support inventory"]["run"],
+    }
+    assert pages_steps["Test generated model support inventory"]["run"] == (
+        "npm run test:model-support"
+    )
+    assert docs_steps["Install website dependencies"]["run"] == "npm ci"
+    assert docs_steps["Build production documentation"]["run"] == "npm run build"
+    assert pages_steps["Build site"]["run"].strip().endswith("npm run build")
 
 
 def test_internal_ci_bridge_only_dispatches_an_exact_trusted_head() -> None:
@@ -833,6 +868,14 @@ def test_hardened_unit_container_is_unprivileged_offline_and_cpu_only() -> None:
         "TRUSTED_ENVIRONMENT =", maxsplit=1
     )[0]
     assert "TRTMC_PREMERGE_UNIT_SCOPE" in common
+    assert "TRTMC_PREMERGE_PYTHON_TEST_TARGETS" in common
+    for name in (
+        "TRTMC_PACKAGE_PYTHON_TAGS",
+        "TRTMC_PACKAGE_TENSORRT_VERSION",
+        "TRTMC_PACKAGE_WHEEL_ARCH",
+    ):
+        assert name in common
+    assert "TRTMC_PACKAGE_BUILD_ROOT" not in common
     assert "HF_TOKEN" not in common
     assert "HUGGING_FACE_HUB_TOKEN" not in common
 
@@ -1244,11 +1287,17 @@ def test_premerge_unit_stage_builds_no_model_plugins_or_native_wheel() -> None:
 
 
 def test_builder_unit_scope_runs_python_without_native_build(tmp_path: Path) -> None:
+    selected_test = "tests/e2e/models/qwen/test_qwen_native_kv_routing.py"
+    selected_path = tmp_path / selected_test
+    selected_path.parent.mkdir(parents=True)
+    selected_path.write_text("def test_selected(): pass\n", encoding="utf-8")
+
     class RecordingContext:
         repository = tmp_path
         env = {
             "GITHUB_WORKSPACE": str(tmp_path),
             "TRTMC_PREMERGE_UNIT_SCOPE": "builder",
+            "TRTMC_PREMERGE_PYTHON_TEST_TARGETS": json.dumps([selected_test]),
             "TRTMC_UNIT_BUILD_JOBS": "8",
             "TRTMC_UNIT_TEST_JOBS": "8",
         }
@@ -1273,9 +1322,42 @@ def test_builder_unit_scope_runs_python_without_native_build(tmp_path: Path) -> 
     ]
     assert len(pytest_commands) == 1
     assert "tests/builder/" in pytest_commands[0]
+    assert selected_test in pytest_commands[0]
     assert not [
         command for command in context.commands if command[0] in {"cmake", "ctest"}
     ]
+
+
+@pytest.mark.parametrize(
+    "selected_test",
+    [
+        "../outside/test_bad.py",
+        "tests/e2e/models/qwen/test_qwen_e2e.py",
+        "-k",
+    ],
+)
+def test_premerge_rejects_an_unsafe_selected_python_test(
+    tmp_path: Path,
+    selected_test: str,
+) -> None:
+    class RecordingContext:
+        repository = tmp_path
+        env = {
+            "GITHUB_WORKSPACE": str(tmp_path),
+            "TRTMC_PREMERGE_UNIT_SCOPE": "builder",
+            "TRTMC_PREMERGE_PYTHON_TEST_TARGETS": json.dumps([selected_test]),
+            "TRTMC_UNIT_BUILD_JOBS": "8",
+            "TRTMC_UNIT_TEST_JOBS": "8",
+        }
+
+        def positive_integer(self, value: str, _name: str) -> int:
+            return int(value)
+
+        def run(self, command: list[object], **_kwargs: object) -> subprocess.CompletedProcess:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    with pytest.raises(CiError, match="selected Python test target"):
+        UnitTestRunner(RecordingContext()).premerge()
 
 
 

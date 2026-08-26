@@ -1554,6 +1554,7 @@ class TestNoImpact:
             "Dockerfile.community-cpu",
             "requirements/community-ci.txt",
             "tools/community_ci.py",
+            "tools/pr_metadata.py",
         ],
     )
     def test_community_cpu_contract_triggers_tools_tier(self, imap, path):
@@ -1567,6 +1568,7 @@ class TestNoImpact:
     @pytest.mark.parametrize(
         "path",
         [
+            ".coderabbit.yaml",
             "CODEOWNERS",
             "ruff.toml",
             "tests/__init__.py",

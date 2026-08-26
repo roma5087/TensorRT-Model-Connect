@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -117,11 +118,32 @@ def test_impact_publishes_only_the_public_cpu_scope(
             ],
         },
     )
+    monkeypatch.setattr(
+        runner.commands,
+        "run",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps(
+                {
+                    "builder_tests": [
+                        "tests/e2e/models/qwen/test_qwen_native_kv_routing.py"
+                    ],
+                    "tools_tests": [],
+                }
+            ),
+            stderr="",
+        ),
+    )
 
     result = runner.impact(None)
 
     assert result["unit_scope"] == "cli"
-    assert github_output.read_text(encoding="utf-8") == ("run_unit_tests=true\nunit_scope=cli\n")
+    assert github_output.read_text(encoding="utf-8") == (
+        "run_unit_tests=true\n"
+        "unit_scope=cli\n"
+        'python_test_targets=["tests/e2e/models/qwen/test_qwen_native_kv_routing.py"]\n'
+    )
     summary = github_summary.read_text(encoding="utf-8")
     assert "Unit scope: `cli`" in summary
     assert "src/runtime/config/cli_support.cpp" in summary
@@ -159,34 +181,88 @@ def test_public_workflow_is_an_automatic_read_only_exact_merge_gate() -> None:
     jobs = workflow["jobs"]
     assert [job["name"] for job in jobs.values()] == [
         "Community CPU / Source quality",
+        "Community CPU / Docs",
         "Community CPU / Ownership and impact",
         "Community CPU / Unit / C++ and Python",
         "Community CPU / Required",
     ]
     assert all(job["runs-on"] == "ubuntu-24.04" for job in jobs.values())
-    for job_name in ("source-quality", "ownership-impact", "unit"):
+    for job_name in ("source-quality", "docs", "ownership-impact", "unit"):
         assert jobs[job_name]["permissions"] == {"contents": "read"}
     assert jobs["unit"]["if"] == "${{ !cancelled() }}"
     assert jobs["unit"]["needs"] == "ownership-impact"
+    assert jobs["ownership-impact"]["outputs"]["python_test_targets"] == (
+        "${{ steps.impact.outputs.python_test_targets }}"
+    )
+    unit_steps = {step["name"]: step for step in jobs["unit"]["steps"]}
+    assert unit_steps["Run hardened source-only units"]["env"][
+        "TRTMC_PREMERGE_PYTHON_TEST_TARGETS"
+    ] == "${{ needs.ownership-impact.outputs.python_test_targets }}"
     assert jobs["required"]["needs"] == [
         "source-quality",
+        "docs",
         "ownership-impact",
         "unit",
     ]
     assert jobs["required"]["permissions"] == {}
     assert jobs["required"]["if"] == "${{ !cancelled() }}"
 
+    docs = jobs["docs"]
+    assert "if" not in docs
+    assert "needs" not in docs
+    docs_steps = {step["name"]: step for step in docs["steps"]}
+    assert list(docs_steps) == [
+        "Check out the exact PR merge",
+        "Set up Node",
+        "Install website dependencies",
+        "Test generated model support inventory",
+        "Build production documentation",
+    ]
+    assert all("if" not in step for step in docs_steps.values())
+    assert docs_steps["Check out the exact PR merge"]["with"] == {
+        "ref": "${{ github.sha }}",
+        "fetch-depth": 0,
+        "persist-credentials": False,
+    }
+    assert docs_steps["Set up Node"] == {
+        "name": "Set up Node",
+        "uses": "actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020",
+        "with": {"node-version": "20"},
+    }
+    assert docs_steps["Install website dependencies"] == {
+        "name": "Install website dependencies",
+        "working-directory": "website",
+        "run": "npm ci",
+    }
+    assert docs_steps["Test generated model support inventory"] == {
+        "name": "Test generated model support inventory",
+        "working-directory": "website",
+        "run": "npm run test:model-support",
+    }
+    assert docs_steps["Build production documentation"] == {
+        "name": "Build production documentation",
+        "working-directory": "website",
+        "env": {
+            "SITE_URL": "https://nvidia.github.io",
+            "BASE_URL": "/TensorRT-Model-Connect/",
+        },
+        "run": "npm run build",
+    }
+
 
 @pytest.mark.parametrize(
-    ("source_quality", "ownership_impact", "unit", "expected_returncode"),
+    ("source_quality", "docs", "ownership_impact", "unit", "expected_returncode"),
     [
-        ("success", "success", "success", 0),
-        ("failure", "success", "success", 1),
-        ("success", "failure", "failure", 1),
+        ("success", "success", "success", "success", 0),
+        ("failure", "success", "success", "success", 1),
+        ("success", "failure", "success", "success", 1),
+        ("success", "skipped", "success", "success", 1),
+        ("success", "success", "failure", "failure", 1),
     ],
 )
 def test_public_required_job_fails_closed(
     source_quality: str,
+    docs: str,
     ownership_impact: str,
     unit: str,
     expected_returncode: int,
@@ -194,6 +270,7 @@ def test_public_required_job_fails_closed(
     environment = {
         **os.environ,
         "SOURCE_QUALITY_RESULT": source_quality,
+        "DOCS_RESULT": docs,
         "OWNERSHIP_IMPACT_RESULT": ownership_impact,
         "UNIT_RESULT": unit,
     }
@@ -216,6 +293,7 @@ def test_public_required_job_fails_closed(
 
     assert result.returncode == expected_returncode, result.stdout + result.stderr
     assert f"Source quality: {source_quality}" in result.stdout
+    assert f"Docs: {docs}" in result.stdout
     assert f"Ownership and impact: {ownership_impact}" in result.stdout
     assert f"Unit / C++ and Python: {unit}" in result.stdout
 

@@ -4544,6 +4544,12 @@ def test_build_bundle_command_uses_manifest_build_settings(tmp_path: Path) -> No
             "decoder_engine_layout": "dual_profile",
             "parallel": {"mode": "tensor_parallel", "tp_size": 2},
         },
+        "build_cli_args": [
+            {
+                "flag": "--set",
+                "value": "nemotron_decoder.builder_workspace_gib=2",
+            }
+        ],
         "quantization": {"format": "fp8", "calibration_samples": 4},
     }
 
@@ -4563,6 +4569,9 @@ def test_build_bundle_command_uses_manifest_build_settings(tmp_path: Path) -> No
         cmd.index("--decoder-engine-layout") : cmd.index("--decoder-engine-layout") + 2
     ]
     assert ["--precision", "bf16"] == cmd[cmd.index("--precision") : cmd.index("--precision") + 2]
+    assert ["--set", "nemotron_decoder.builder_workspace_gib=2"] == cmd[
+        cmd.index("--set") : cmd.index("--set") + 2
+    ]
     assert "--trust-remote-code" in cmd
     assert "--verbose" in cmd
 
@@ -4925,7 +4934,10 @@ def test_ensure_bundle_replaces_incompatible_tensorrt_abi(
         return Result()
 
     monkeypatch.setattr(validation_engine.subprocess, "run", fake_run)
-    monkeypatch.setattr(validation_engine, "runtime_tensorrt_abi", lambda: "11.1")
+    monkeypatch.setattr(
+        "tensorrt_model_connect.trt_compat.tensorrt_abi",
+        lambda _version=None: "11.1",
+)
 
     _, built = validation_engine.ensure_bundle(
         {
@@ -4970,7 +4982,10 @@ def test_ensure_bundle_replaces_mismatched_precision(
         return Result()
 
     monkeypatch.setattr(validation_engine.subprocess, "run", fake_run)
-    monkeypatch.setattr(validation_engine, "runtime_tensorrt_abi", lambda: "11.1")
+    monkeypatch.setattr(
+        "tensorrt_model_connect.trt_compat.tensorrt_abi",
+        lambda _version=None: "11.1",
+    )
 
     _, built = validation_engine.ensure_bundle(
         {
@@ -4990,7 +5005,10 @@ def test_ensure_bundle_replaces_mismatched_precision(
 
 
 def test_bundle_reuse_rejects_unrecognized_precision(monkeypatch) -> None:
-    monkeypatch.setattr(validation_engine, "runtime_tensorrt_abi", lambda: "11.1")
+    monkeypatch.setattr(
+        "tensorrt_model_connect.trt_compat.tensorrt_abi",
+        lambda _version=None: "11.1",
+    )
 
     assert not validation_engine._bundle_can_be_reused(
         {

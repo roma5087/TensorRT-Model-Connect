@@ -124,13 +124,24 @@ git rebase upstream/main
 git push --set-upstream origin docs/improve-getting-started
 ```
 
-The pull request should record:
+Complete every pull-request template section. Use
+`Not applicable: <reason>` when a field does not apply instead of deleting it.
+Follow the repository's established PR-description structure:
 
-- exact scope and non-goals;
-- exact base and tested head revisions;
-- commands actually executed;
-- model, artifact, hardware, and environment for GPU claims;
-- remaining risks and paths not executed.
+- **Background** for the problem, motivation, and linked issue;
+- **Exit Criteria** for completion conditions and non-goals;
+- **Implementation** for the approach, affected models/components, and
+  compatibility surface;
+- **Validation** for exact commands and results, tested revisions, hardware and
+  environment, and paths not executed; and
+- **Notes For Future Readers** for remaining risk, provenance, rollout, and
+  follow-up context.
+
+`PR Metadata / Required` verifies this evidence contract, while trusted triage
+automation derives model and component labels from the actual diff and
+repository ownership metadata. Risk and compatibility-change labels come from
+the corresponding template selections. DCO sign-off is enforced separately by
+the repository's DCO check.
 
 Compilation, source tests, model parity, target-hardware execution,
 performance, and release qualification are different evidence tiers.
@@ -142,6 +153,10 @@ contributor-visible, GitHub-hosted `Community CPU` validation against GitHub's
 exact pull-request merge revision. Separate jobs run source quality, ownership
 and impact, and source-only C++ and Python units. No comment or maintainer action
 is required.
+
+For directly changed Python unit tests, impact analysis also passes the exact
+test files to the CPU unit job. This includes non-E2E model-owned tests under
+`tests/e2e/models/`; tests marked `gpu`, `trt`, or `e2e` remain excluded.
 
 The test jobs have read-only repository permission and no access to private
 runners, secrets, or GPUs, and every public job uses a GitHub-hosted
